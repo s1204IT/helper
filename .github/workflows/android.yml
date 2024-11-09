@@ -3,6 +3,8 @@ name: Android CI
 on:
   push:
     branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
   workflow_dispatch:
 
 permissions:
@@ -15,59 +17,77 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
           fetch-depth: 0
-      - name: set up JDK 17
-        uses: actions/setup-java@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
-          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Checkout libxposed-api
+        uses: actions/checkout@v4
+        with:
+          repository: libxposed/api
+          ref: master
+          path: libxposed/api
+          fetch-depth: 0
+
       - name: Build dependencies
+        working-directory: libxposed/api
         run: |
-          mkdir -p libxposed
-          cd libxposed
-          git clone https://github.com/libxposed/api.git
-          cd api
-          echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
-          ./gradlew publishToMavenLocal
-          cd ../..
+          echo 'org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8' >> gradle.properties
+          ./gradlew publishToMavenLocal --no-daemon
         env:
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.maven_pgp_signingKey }}
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.maven_pgp_signingPassword }}
+
       - name: Build with Gradle
         run: |
-          echo 'org.gradle.caching=true' >> gradle.properties
-          echo 'org.gradle.parallel=true' >> gradle.properties
-          echo 'org.gradle.vfs.watch=true' >> gradle.properties
-          echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
-          ./gradlew publishToMavenLocal
-          ./gradlew --stop
+          {
+            echo 'org.gradle.caching=true'
+            echo 'org.gradle.parallel=true'
+            echo 'org.gradle.vfs.watch=true'
+            echo 'org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8'
+          } >> gradle.properties
+          ./gradlew publishToMavenLocal --no-daemon
+          {
+            echo "version=$(cat helper-ktx/build.gradle.kts | grep version | awk -F\" '{print $2}')"
+            echo "commit=$(echo ${{ github.sha }} | cut -c-7)"
+          } >> $GITHUB_ENV
+          rm -rf ~/.m2/repository/io/github/libxposed/api/
         env:
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.maven_pgp_signingKey }}
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.maven_pgp_signingPassword }}
-      - name: Upload library
-        uses: actions/upload-artifact@v3
+
+      - name: Upload maven library
+        uses: actions/upload-artifact@v4
         with:
-          name: library
-          path: ~/.m2
+          name: libxposed-helper-${{ env.version }}@${{ env.commit }}
+          path: ~/.m2/repository/
+
       - name: Prepare pages
         run: |
-          mkdir -p docs
-          cp -r helper/build/intermediates/java_doc_dir/release/* docs/
           mkdir -p docs/ktx
-          cp -r helper-ktx/build/intermediates/java_doc_dir/release/* docs/ktx
+          cp -r helper/build/intermediates/java_doc_dir/release/javaDocReleaseGeneration/* docs/
+          cp -r helper-ktx/build/intermediates/java_doc_dir/release/javaDocReleaseGeneration/* docs/ktx/
+
       - name: Upload pages
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-pages-artifact@v3
         with:
           # Upload entire repository
           path: 'docs'
+
       - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@main
+        uses: actions/deploy-pages@v4
