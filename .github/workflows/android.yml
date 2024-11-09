@@ -39,7 +39,7 @@ jobs:
       - name: Checkout libxposed-api
         uses: actions/checkout@v4
         with:
-          repository: libxposed/api
+          repository: s1204IT/libxposed-api
           ref: master
           path: libxposed/api
           fetch-depth: 0
